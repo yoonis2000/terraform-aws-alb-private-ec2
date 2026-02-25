@@ -11,6 +11,18 @@ module "vpc" {
   private_b_cidr = "10.10.4.0/24"
 }
 
+module "alb" {
+  source = "./modules/alb"
+
+  name              = "prod"
+  vpc_id            = module.vpc.vpc_id
+  public_subnet_ids = module.vpc.public_subnet_ids
+  alb_sg_id         = aws_security_group.alb_sg.id
+
+  target_port       = 80
+  health_check_path = "/"
+}
+
 #Security Group
 resource "aws_security_group" "alb_sg" {
   name        = "prod-alb-sg"
@@ -57,47 +69,6 @@ resource "aws_security_group" "ec2_sg" {
 
   tags = {
     Name = "prod-ec2-sg"
-  }
-}
-
-#Application Load Balancer
-resource "aws_lb" "alb" {
-  name               = "prod-alb"
-  load_balancer_type = "application"
-  subnets = module.vpc.public_subnet_ids
-  security_groups = [aws_security_group.alb_sg.id]
-
-  tags = {
-    Name = "prod-alb"
-  }
-}
-
-#Target Group
-resource "aws_lb_target_group" "tg" {
-  name     = "prod-tg"
-  port     = 80
-  protocol = "HTTP"
-  vpc_id   = module.vpc.vpc_id
-
-  health_check {
-    path = "/"
-    port = "traffic-port"
-  }
-
-  tags = {
-    Name = "prod-tg"
-  }
-}
-
-#Listener
-resource "aws_lb_listener" "http" {
-  load_balancer_arn = aws_lb.alb.arn
-  port              = 80
-  protocol          = "HTTP"
-
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.tg.arn
   }
 }
 
@@ -194,7 +165,7 @@ resource "aws_autoscaling_group" "asg" {
     version = "$Latest"
   }
 
-  target_group_arns = [aws_lb_target_group.tg.arn]
+  target_group_arns = [module.alb.target_group_arn]
 
   health_check_type         = "ELB"
   health_check_grace_period = 120
