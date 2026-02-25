@@ -1,127 +1,21 @@
-#VPC
-resource "aws_vpc" "prod_vpc" {
-  cidr_block = "10.10.0.0/16"
+module "vpc" {
+  source = "./modules/vpc"
 
-  tags = {
-    Name = "prod-style-vpc-updated"
-  }
-}
-
-#Subnets
-resource "aws_subnet" "public_a" {
-  vpc_id            = aws_vpc.prod_vpc.id
-  cidr_block        = "10.10.1.0/24"
-  availability_zone = "eu-west-2a"
-
-  tags = {
-    Name = "prod-public-a"
-  }
-}
-resource "aws_subnet" "public_b" {
-  vpc_id            = aws_vpc.prod_vpc.id
-  cidr_block        = "10.10.3.0/24"
-  availability_zone = "eu-west-2b"
-
-  tags = {
-    Name = "prod-public-b"
-  }
-}
-resource "aws_subnet" "private_a" {
-  vpc_id            = aws_vpc.prod_vpc.id
-  cidr_block        = "10.10.2.0/24"
-  availability_zone = "eu-west-2a"
-
-  tags = {
-    Name = "prod-private-a"
-  }
-}
-
-resource "aws_subnet" "private_b" {
-  vpc_id            = aws_vpc.prod_vpc.id
-  cidr_block        = "10.10.4.0/24"
-  availability_zone = "eu-west-2b"
-
-  tags = {
-    Name = "prod-private-b"
-  }
-}
-
-#Internet Access
-resource "aws_internet_gateway" "igw" {
-  vpc_id = aws_vpc.prod_vpc.id
-
-  tags = {
-    Name = "prod-igw"
-  }
-}
-resource "aws_route_table" "public_rt" {
-  vpc_id = aws_vpc.prod_vpc.id
-
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.igw.id
-  }
-
-  tags = {
-    Name = "prod-public-rt"
-  }
-}
-resource "aws_route_table_association" "public_assoc" {
-  subnet_id      = aws_subnet.public_a.id
-  route_table_id = aws_route_table.public_rt.id
-}
-resource "aws_route_table_association" "public_assoc_b" {
-  subnet_id      = aws_subnet.public_b.id
-  route_table_id = aws_route_table.public_rt.id
-}
-
-# NAT Gateway (for private subnet outbound internet access)
-
-resource "aws_eip" "nat_eip" {
-  domain = "vpc"
-
-  tags = {
-    Name = "prod-nat-eip"
-  }
-}
-
-resource "aws_nat_gateway" "nat_a" {
-  allocation_id = aws_eip.nat_eip.id
-  subnet_id     = aws_subnet.public_a.id
-
-  tags = {
-    Name = "prod-nat-a"
-  }
-}
-
-resource "aws_route_table" "private_rt" {
-  vpc_id = aws_vpc.prod_vpc.id
-
-  route {
-    cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.nat_a.id
-  }
-
-  tags = {
-    Name = "prod-private-rt"
-  }
-}
-
-resource "aws_route_table_association" "private_assoc_a" {
-  subnet_id      = aws_subnet.private_a.id
-  route_table_id = aws_route_table.private_rt.id
-}
-
-resource "aws_route_table_association" "private_assoc_b" {
-  subnet_id      = aws_subnet.private_b.id
-  route_table_id = aws_route_table.private_rt.id
+  name           = "prod"
+  vpc_cidr       = "10.10.0.0/16"
+  az_a           = "eu-west-2a"
+  az_b           = "eu-west-2b"
+  public_a_cidr  = "10.10.1.0/24"
+  public_b_cidr  = "10.10.3.0/24"
+  private_a_cidr = "10.10.2.0/24"
+  private_b_cidr = "10.10.4.0/24"
 }
 
 #Security Group
 resource "aws_security_group" "alb_sg" {
   name        = "prod-alb-sg"
   description = "Allow HTTP traffic"
-  vpc_id      = aws_vpc.prod_vpc.id
+  vpc_id      = module.vpc.vpc_id
 
   ingress {
     from_port   = 80
@@ -145,7 +39,7 @@ resource "aws_security_group" "alb_sg" {
 resource "aws_security_group" "ec2_sg" {
   name        = "prod-ec2-sg"
   description = "Allow HTTP only from ALB"
-  vpc_id      = aws_vpc.prod_vpc.id
+  vpc_id      = module.vpc.vpc_id
 
   ingress {
     from_port       = 80
@@ -170,10 +64,7 @@ resource "aws_security_group" "ec2_sg" {
 resource "aws_lb" "alb" {
   name               = "prod-alb"
   load_balancer_type = "application"
-  subnets = [
-    aws_subnet.public_a.id,
-    aws_subnet.public_b.id
-  ]
+  subnets = module.vpc.public_subnet_ids
   security_groups = [aws_security_group.alb_sg.id]
 
   tags = {
@@ -186,7 +77,7 @@ resource "aws_lb_target_group" "tg" {
   name     = "prod-tg"
   port     = 80
   protocol = "HTTP"
-  vpc_id   = aws_vpc.prod_vpc.id
+  vpc_id   = module.vpc.vpc_id
 
   health_check {
     path = "/"
@@ -296,7 +187,7 @@ resource "aws_autoscaling_group" "asg" {
   desired_capacity    = 2
   min_size            = 2
   max_size            = 3
-  vpc_zone_identifier = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+  vpc_zone_identifier = module.vpc.private_subnet_ids
 
   launch_template {
     id      = aws_launch_template.lt.id
